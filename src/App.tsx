@@ -1,5 +1,7 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import BottomNav from '@/components/BottomNav'
+import { useAppStore } from '@/store/useAppStore'
+import CreateHouse from '@/pages/CreateHouse'
 import Home from '@/pages/Home'
 import Chores from '@/pages/Chores'
 import Shopping from '@/pages/Shopping'
@@ -11,25 +13,32 @@ import Visitors from '@/pages/Visitors'
 import Profile from '@/pages/Profile'
 import Checkin from '@/pages/Checkin'
 
+function HouseGuard({ children }: { children: React.ReactNode }) {
+  const hasHouse = useAppStore(s => s.hasHouse)
+  if (!hasHouse()) return <Navigate to="/welcome" replace />
+  return <>{children}</>
+}
+
 export default function App() {
   return (
     <Router>
       <div className="flex flex-col min-h-screen bg-cream">
         <div className="flex-1">
           <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/chores" element={<Chores />} />
-            <Route path="/shopping" element={<Shopping />} />
-            <Route path="/ledger" element={<Ledger />} />
-            <Route path="/fridge" element={<Fridge />} />
-            <Route path="/chat" element={<Chat />} />
-            <Route path="/vote" element={<Vote />} />
-            <Route path="/visitors" element={<Visitors />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/checkin" element={<Checkin />} />
+            <Route path="/welcome" element={<CreateHouse />} />
+            <Route path="/" element={<HouseGuard><Home /></HouseGuard>} />
+            <Route path="/chores" element={<HouseGuard><Chores /></HouseGuard>} />
+            <Route path="/shopping" element={<HouseGuard><Shopping /></HouseGuard>} />
+            <Route path="/ledger" element={<HouseGuard><Ledger /></HouseGuard>} />
+            <Route path="/fridge" element={<HouseGuard><Fridge /></HouseGuard>} />
+            <Route path="/chat" element={<HouseGuard><Chat /></HouseGuard>} />
+            <Route path="/vote" element={<HouseGuard><Vote /></HouseGuard>} />
+            <Route path="/visitors" element={<HouseGuard><Visitors /></HouseGuard>} />
+            <Route path="/profile" element={<HouseGuard><Profile /></HouseGuard>} />
+            <Route path="/checkin" element={<HouseGuard><Checkin /></HouseGuard>} />
           </Routes>
         </div>
-        <BottomNav />
+        <HouseGuard><BottomNav /></HouseGuard>
       </div>
     </Router>
   )

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Clock, PenLine, ShoppingCart, UserRoundPlus } from 'lucide-react'
+import { Clock, PenLine, ShoppingCart, UserRoundPlus, AlertCircle } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import Avatar from '@/components/Avatar'
 
@@ -43,6 +43,8 @@ export default function Home() {
   const shopping = useAppStore(s => s.shopping)
   const activities = useAppStore(s => s.activities)
   const getMemberById = useAppStore(s => s.getMemberById)
+  const currentMemberId = useAppStore(s => s.currentMemberId)
+  const settleExpenseSplit = useAppStore(s => s.settleExpenseSplit)
 
   const me = getCurrentMember()
   const today = getTodayStr()
@@ -70,6 +72,19 @@ export default function Home() {
 
   const purchaseCount = shopping.filter(s => s.purchased).length
 
+  const myUnpaidBills = expenses.filter(e => !e.settled).flatMap(e =>
+    e.splits.filter(s => s.memberId === currentMemberId && !s.paid).map(s => ({
+      expenseId: e.id,
+      description: e.description,
+      amount: s.amount,
+      payerId: e.payerId,
+    }))
+  )
+
+  const othersUnpaidBills = expenses.filter(e => !e.settled).flatMap(e =>
+    e.splits.filter(s => s.memberId !== currentMemberId && !s.paid)
+  ).length
+
   return (
     <div className="page-container space-y-4">
       <div className="flex items-center gap-3 pt-2">
@@ -79,6 +94,42 @@ export default function Home() {
           <div className="text-sm text-[var(--color-text-secondary)]">{today}</div>
         </div>
       </div>
+
+      {myUnpaidBills.length > 0 && (
+        <Link to="/ledger" className="block">
+          <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertCircle className="w-5 h-5 text-[var(--color-danger)]" />
+              <span className="font-bold text-[var(--color-danger)]">你有 {myUnpaidBills.length} 笔待结清账单</span>
+            </div>
+            <div className="space-y-2">
+              {myUnpaidBills.map((bill, i) => {
+                const payer = getMemberById(bill.payerId)
+                return (
+                  <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-[var(--color-text)] truncate">{bill.description}</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">垫付人：{payer?.name}</p>
+                    </div>
+                    <div className="flex items-center gap-2 ml-2">
+                      <span className="font-bold text-[var(--color-danger)]">¥{bill.amount.toFixed(2)}</span>
+                      <button
+                        onClick={(e) => { e.preventDefault(); settleExpenseSplit(bill.expenseId, currentMemberId) }}
+                        className="px-2.5 py-1 bg-[var(--color-danger)] text-white text-xs rounded-full font-medium active:scale-90 transition-transform"
+                      >
+                        结算
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {othersUnpaidBills > 0 && (
+              <p className="text-xs text-[var(--color-text-muted)] mt-2">还有 {othersUnpaidBills} 笔他人未结清账单</p>
+            )}
+          </div>
+        </Link>
+      )}
 
       <Link to="/chores" className="card-hover block">
         <div className="flex items-center justify-between mb-3">

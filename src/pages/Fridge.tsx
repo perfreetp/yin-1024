@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Plus, X, AlertTriangle } from 'lucide-react'
+import { Plus, X, AlertTriangle, ArrowRightLeft } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import PageHeader from '@/components/PageHeader'
 import Avatar from '@/components/Avatar'
@@ -28,17 +28,25 @@ function getDaysUntil(dateStr: string) {
 
 export default function Fridge() {
   const fridge = useAppStore(s => s.fridge)
+  const members = useAppStore(s => s.members)
   const addFridgeItem = useAppStore(s => s.addFridgeItem)
-  const toggleFridgeBorrow = useAppStore(s => s.toggleFridgeBorrow)
+  const borrowFridgeItem = useAppStore(s => s.borrowFridgeItem)
+  const returnFridgeItem = useAppStore(s => s.returnFridgeItem)
   const removeFridgeItem = useAppStore(s => s.removeFridgeItem)
   const getMemberById = useAppStore(s => s.getMemberById)
   const currentMemberId = useAppStore(s => s.currentMemberId)
+  const house = useAppStore(s => s.house)
 
   const [showAdd, setShowAdd] = useState(false)
   const [newName, setNewName] = useState('')
   const [newCategory, setNewCategory] = useState('饮品')
   const [newOwnership, setNewOwnership] = useState<'shared' | 'personal'>('shared')
   const [newExpiryDate, setNewExpiryDate] = useState('')
+
+  const [showBorrow, setShowBorrow] = useState(false)
+  const [borrowItemId, setBorrowItemId] = useState('')
+  const [borrowMemberId, setBorrowMemberId] = useState('')
+  const [borrowReturnDate, setBorrowReturnDate] = useState('')
 
   const gridRef = useRef<HTMLDivElement>(null)
 
@@ -53,12 +61,13 @@ export default function Fridge() {
     return getDaysUntil(item.expiryDate) <= 0
   })
 
-  const borrowedItems = fridge.filter(item => item.borrowed && item.ownership === 'shared')
+  const borrowedItems = fridge.filter(item => item.borrowed)
+  const sharedAvailableItems = fridge.filter(item => item.ownership === 'shared' && !item.borrowed)
 
   const handleAdd = () => {
     if (!newName.trim()) return
     addFridgeItem({
-      houseId: 'h1',
+      houseId: house.id,
       name: newName.trim(),
       ownerId: currentMemberId,
       ownership: newOwnership,
@@ -73,8 +82,26 @@ export default function Fridge() {
     setShowAdd(false)
   }
 
-  const handleReturn = (itemId: string, borrowedBy: string) => {
-    toggleFridgeBorrow(itemId, borrowedBy)
+  const openBorrowDialog = (itemId: string) => {
+    setBorrowItemId(itemId)
+    setBorrowMemberId('')
+    const d = new Date()
+    d.setDate(d.getDate() + 3)
+    setBorrowReturnDate(d.toISOString().slice(0, 10))
+    setShowBorrow(true)
+  }
+
+  const handleBorrow = () => {
+    if (!borrowMemberId || !borrowReturnDate) return
+    borrowFridgeItem(borrowItemId, borrowMemberId, borrowReturnDate)
+    setShowBorrow(false)
+    setBorrowItemId('')
+    setBorrowMemberId('')
+    setBorrowReturnDate('')
+  }
+
+  const handleReturn = (itemId: string) => {
+    returnFridgeItem(itemId)
   }
 
   const scrollToGrid = () => {
@@ -102,24 +129,30 @@ export default function Fridge() {
       <div className="px-4 pt-3 pb-24">
         {borrowedItems.length > 0 && (
           <div className="mb-4">
-            <h3 className="text-sm font-bold text-[var(--color-text)] mb-2">共享物品借用</h3>
+            <h3 className="text-sm font-bold text-[var(--color-text)] mb-2">借出中</h3>
             <div className="space-y-2">
               {borrowedItems.map(item => {
                 const borrower = item.borrowedBy ? getMemberById(item.borrowedBy) : undefined
                 return (
                   <div key={item.id} className="bg-white rounded-xl p-3 shadow-soft flex items-center gap-3">
-                    <Avatar memberId={item.borrowedBy} size="sm" />
+                    <span className="text-xl">{CATEGORY_EMOJI[item.category] || '📦'}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-[var(--color-text)] truncate">{item.name}</p>
-                      <p className="text-xs text-gray-400">
-                        {borrower?.name} 借用 · 预计 {item.borrowReturnDate} 归还
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <Avatar memberId={item.borrowedBy} size="sm" />
+                        <span className="text-xs text-gray-500">
+                          {borrower?.name} 借用
+                        </span>
+                      </div>
+                      <p className="text-xs text-orange-500 mt-0.5">
+                        预计 {item.borrowReturnDate} 归还
                       </p>
                     </div>
                     <button
-                      onClick={() => handleReturn(item.id, item.borrowedBy!)}
-                      className="px-3 py-1 bg-primary text-white text-xs rounded-lg font-medium active:scale-95 transition-transform"
+                      onClick={() => handleReturn(item.id)}
+                      className="px-3 py-1.5 bg-secondary text-white text-xs rounded-lg font-medium active:scale-95 transition-transform"
                     >
-                      归还
+                      已归还
                     </button>
                   </div>
                 )
@@ -128,8 +161,34 @@ export default function Fridge() {
           </div>
         )}
 
+        {sharedAvailableItems.length > 0 && (
+          <div className="mb-4">
+            <h3 className="text-sm font-bold text-[var(--color-text)] mb-2">可借用的公共食材</h3>
+            <div className="space-y-2">
+              {sharedAvailableItems.map(item => (
+                <div key={item.id} className="bg-white rounded-xl p-3 shadow-soft flex items-center gap-3">
+                  <span className="text-xl">{CATEGORY_EMOJI[item.category] || '📦'}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[var(--color-text)] truncate">{item.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {item.expiryDate ? `到期 ${item.expiryDate}` : '无到期日'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => openBorrowDialog(item.id)}
+                    className="px-3 py-1.5 bg-primary/10 text-primary text-xs rounded-lg font-medium flex items-center gap-1 active:scale-95 transition-transform"
+                  >
+                    <ArrowRightLeft className="w-3 h-3" />
+                    借用
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div ref={gridRef}>
-          <h3 className="text-sm font-bold text-[var(--color-text)] mb-2">食材列表</h3>
+          <h3 className="text-sm font-bold text-[var(--color-text)] mb-2">全部食材</h3>
           <div className="grid grid-cols-2 gap-3">
             {fridge.map(item => {
               const isExpired = item.expiryDate ? getDaysUntil(item.expiryDate) <= 0 : false
@@ -142,25 +201,37 @@ export default function Fridge() {
                   key={item.id}
                   className={`bg-white rounded-2xl p-3 shadow-soft ${
                     isNearExpiry ? 'border-2 border-red-400' : ''
-                  } ${isExpired ? 'opacity-60' : ''}`}
+                  } ${isExpired ? 'opacity-60' : ''} ${item.borrowed ? 'border-2 border-orange-300' : ''}`}
                 >
                   <div className="flex items-start justify-between">
                     <span className="text-2xl">{emoji}</span>
-                    {isExpired && (
-                      <button
-                        onClick={() => removeFridgeItem(item.id)}
-                        className="p-0.5 text-gray-300 hover:text-red-400 transition-colors"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {item.borrowed && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded-full font-medium">借出中</span>
+                      )}
+                      {isExpired && (
+                        <button
+                          onClick={() => removeFridgeItem(item.id)}
+                          className="p-0.5 text-gray-300 hover:text-red-400 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className={`text-sm font-medium mt-1 ${isExpired ? 'line-through text-gray-400' : 'text-[var(--color-text)]'}`}>
                     {item.name}
                   </p>
-                  <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium mt-1 ${ownership.className}`}>
-                    {ownership.label}
-                  </span>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${ownership.className}`}>
+                      {ownership.label}
+                    </span>
+                    {item.borrowed && item.borrowedBy && (
+                      <span className="text-[10px] text-orange-500 truncate">
+                        → {getMemberById(item.borrowedBy)?.name}
+                      </span>
+                    )}
+                  </div>
                   {item.expiryDate && (
                     <p className={`text-xs mt-1 ${isExpired ? 'text-red-400' : isNearExpiry ? 'text-red-500' : 'text-gray-400'}`}>
                       {isExpired ? '已过期' : isNearExpiry ? '临期' : ''} {item.expiryDate}
@@ -193,75 +264,90 @@ export default function Fridge() {
                 <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
-
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-1.5">名称</label>
-                <input
-                  value={newName}
-                  onChange={e => setNewName(e.target.value)}
-                  placeholder="输入食材名称"
-                  className="w-full px-4 py-2.5 bg-cream rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                />
+                <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="输入食材名称" className="w-full px-4 py-2.5 bg-cream rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-1.5">类别</label>
                 <div className="flex flex-wrap gap-2">
                   {CATEGORIES.map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => setNewCategory(cat)}
-                      className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${
-                        newCategory === cat
-                          ? 'bg-primary text-white'
-                          : 'bg-cream text-gray-500'
-                      }`}
-                    >
+                    <button key={cat} onClick={() => setNewCategory(cat)} className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-colors ${newCategory === cat ? 'bg-primary text-white' : 'bg-cream text-gray-500'}`}>
                       {CATEGORY_EMOJI[cat] || '📦'} {cat}
                     </button>
                   ))}
                 </div>
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-1.5">归属</label>
                 <div className="flex gap-2">
                   {(['shared', 'personal'] as const).map(type => {
                     const cfg = OWNERSHIP_CONFIG[type]
                     return (
-                      <button
-                        key={type}
-                        onClick={() => setNewOwnership(type)}
-                        className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
-                          newOwnership === type
-                            ? `${cfg.className} ring-2 ring-offset-1 ring-current`
-                            : 'bg-cream text-gray-400'
-                        }`}
-                      >
+                      <button key={type} onClick={() => setNewOwnership(type)} className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${newOwnership === type ? `${cfg.className} ring-2 ring-offset-1 ring-current` : 'bg-cream text-gray-400'}`}>
                         {cfg.label}
                       </button>
                     )
                   })}
                 </div>
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-1.5">到期日期</label>
+                <input type="date" value={newExpiryDate} onChange={e => setNewExpiryDate(e.target.value)} className="w-full px-4 py-2.5 bg-cream rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/30" />
+              </div>
+              <button onClick={handleAdd} disabled={!newName.trim()} className="w-full py-3 bg-primary text-white rounded-xl font-medium active:scale-[0.98] transition-transform disabled:opacity-40 disabled:active:scale-100">
+                添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBorrow && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30" onClick={() => setShowBorrow(false)}>
+          <div className="w-full max-w-lg bg-white rounded-t-3xl p-6 pb-8 shadow-float" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-[var(--color-text)]">标记借出</h3>
+              <button onClick={() => setShowBorrow(false)} className="p-1">
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-500 mb-1.5">借用人</label>
+                <div className="flex flex-wrap gap-2">
+                  {members.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => setBorrowMemberId(m.id)}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                        borrowMemberId === m.id
+                          ? 'bg-primary text-white'
+                          : 'bg-cream text-[var(--color-text-secondary)]'
+                      }`}
+                    >
+                      <span>{m.avatar}</span>
+                      <span>{m.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-500 mb-1.5">预计归还日期</label>
                 <input
                   type="date"
-                  value={newExpiryDate}
-                  onChange={e => setNewExpiryDate(e.target.value)}
+                  value={borrowReturnDate}
+                  onChange={e => setBorrowReturnDate(e.target.value)}
                   className="w-full px-4 py-2.5 bg-cream rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
-
               <button
-                onClick={handleAdd}
-                disabled={!newName.trim()}
+                onClick={handleBorrow}
+                disabled={!borrowMemberId || !borrowReturnDate}
                 className="w-full py-3 bg-primary text-white rounded-xl font-medium active:scale-[0.98] transition-transform disabled:opacity-40 disabled:active:scale-100"
               >
-                添加
+                确认借出
               </button>
             </div>
           </div>

@@ -30,7 +30,6 @@ export default function Chores() {
   const house = useAppStore(s => s.house)
   const addShiftRequest = useAppStore(s => s.addShiftRequest)
   const updateShiftStatus = useAppStore(s => s.updateShiftStatus)
-  const toggleChoreComplete = useAppStore(s => s.toggleChoreComplete)
   const addChoreCheckin = useAppStore(s => s.addChoreCheckin)
   const getMemberById = useAppStore(s => s.getMemberById)
 
@@ -198,6 +197,7 @@ export default function Chores() {
           <div className="space-y-2">
             {chores.filter(c => c.date === todayStr).map(chore => {
               const member = getMemberById(chore.memberId)
+              const isMine = chore.memberId === currentMemberId
               return (
                 <div
                   key={chore.id}
@@ -211,22 +211,33 @@ export default function Chores() {
                       </p>
                       <p className="text-xs text-[var(--color-text-muted)]">
                         {member?.name} · {chore.completed ? '已完成' : '未完成'}
+                        {!isMine && !chore.completed && ' · 非你的任务'}
                       </p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => {
-                      toggleChoreComplete(chore.id)
-                      if (!chore.completed) addChoreCheckin(chore.id)
-                    }}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all active:scale-90 ${
+                  {isMine ? (
+                    <button
+                      onClick={() => {
+                        if (!chore.completed) addChoreCheckin(chore.id)
+                      }}
+                      disabled={chore.completed}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all active:scale-90 ${
+                        chore.completed
+                          ? 'bg-[var(--color-success)] text-white'
+                          : 'border-2 border-[var(--color-primary)] text-[var(--color-primary)]'
+                      }`}
+                    >
+                      {chore.completed ? '✓' : ''}
+                    </button>
+                  ) : (
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${
                       chore.completed
                         ? 'bg-[var(--color-success)] text-white'
-                        : 'border-2 border-[var(--color-border)] text-[var(--color-text-muted)]'
-                    }`}
-                  >
-                    {chore.completed ? '✓' : ''}
-                  </button>
+                        : 'bg-gray-100 text-[var(--color-text-muted)]'
+                    }`}>
+                      {chore.completed ? '✓' : '—'}
+                    </div>
+                  )}
                 </div>
               )
             })}
