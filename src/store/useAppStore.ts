@@ -466,8 +466,45 @@ export const useAppStore = create<AppState>()(
         },
 
         leaveHouse: () => {
+          const state = get()
+          const { inviteCode } = state.house
+          const { currentMemberId } = state
+
           clearCurrentSession()
-          _set({
+
+          let newMembers = state.members
+          if (inviteCode && currentMemberId) {
+            newMembers = state.members.filter(m => m.id !== currentMemberId)
+            const newData: HouseData = {
+              house: state.house,
+              members: newMembers,
+              chores: state.chores,
+              checkins: state.checkins,
+              shifts: state.shifts,
+              shopping: state.shopping,
+              expenses: state.expenses,
+              fridge: state.fridge,
+              votes: state.votes,
+              visitors: state.visitors,
+              messages: state.messages,
+              announcements: state.announcements,
+              activities: state.activities,
+            }
+            saveHouseData(inviteCode, newData)
+
+            const ch = getBroadcastChannel()
+            if (ch) {
+              try {
+                ch.postMessage({
+                  type: 'sync',
+                  inviteCode,
+                  data: newData,
+                })
+              } catch {}
+            }
+          }
+
+          set({
             currentMemberId: '',
             house: EMPTY_HOUSE,
             members: [],

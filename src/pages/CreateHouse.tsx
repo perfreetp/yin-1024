@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Home, Users, ArrowRight } from 'lucide-react'
+import { Home, Users, ArrowRight, Key } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 
 const AVATARS = ['🧑', '👩', '👨', '👩‍🦰', '🧑‍🦱', '👩‍🦳', '🧑‍🦳', '👨‍🦰']
@@ -10,6 +10,7 @@ export default function CreateHouse() {
   const [searchParams] = useSearchParams()
   const createHouse = useAppStore(s => s.createHouse)
   const joinHouse = useAppStore(s => s.joinHouse)
+  const userNameRef = useRef<HTMLInputElement>(null)
 
   const [mode, setMode] = useState<'create' | 'join'>('create')
   const [houseName, setHouseName] = useState('')
@@ -19,12 +20,15 @@ export default function CreateHouse() {
   const [withSample, setWithSample] = useState(true)
   const [inviteCode, setInviteCode] = useState('')
   const [joinError, setJoinError] = useState('')
+  const [hasInviteFromLink, setHasInviteFromLink] = useState(false)
 
   useEffect(() => {
     const code = searchParams.get('invite')
     if (code) {
       setInviteCode(code.toUpperCase())
       setMode('join')
+      setHasInviteFromLink(true)
+      setTimeout(() => userNameRef.current?.focus(), 100)
     }
   }, [searchParams])
 
@@ -75,6 +79,18 @@ export default function CreateHouse() {
         </div>
 
         <div className="space-y-4">
+          {hasInviteFromLink && mode === 'join' && (
+            <div className="bg-secondary/10 border border-secondary/30 rounded-xl p-3 flex items-center gap-2.5">
+              <Key className="w-5 h-5 text-secondary shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-secondary">已通过链接获取邀请码</p>
+                <p className="text-lg font-black tracking-[0.25em] text-[var(--color-text)]">
+                  {inviteCode}
+                </p>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1.5">选择头像</label>
             <div className="flex flex-wrap gap-2">
@@ -95,9 +111,11 @@ export default function CreateHouse() {
           <div>
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1.5">你的名字</label>
             <input
+              ref={userNameRef}
               value={userName}
               onChange={e => setUserName(e.target.value)}
               placeholder="室友们怎么叫你？"
+              onKeyDown={e => e.key === 'Enter' && (mode === 'create' ? handleCreate() : handleJoin())}
               className="w-full px-4 py-2.5 bg-white rounded-xl text-sm outline-none border border-cream-dark focus:border-primary transition-colors"
             />
           </div>
@@ -145,16 +163,18 @@ export default function CreateHouse() {
 
           {mode === 'join' && (
             <>
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1.5">邀请码</label>
-                <input
-                  value={inviteCode}
-                  onChange={e => { setInviteCode(e.target.value.toUpperCase()); setJoinError('') }}
-                  placeholder="输入6位邀请码"
-                  maxLength={6}
-                  className="w-full px-4 py-2.5 bg-white rounded-xl text-sm tracking-widest text-center font-bold outline-none border border-cream-dark focus:border-secondary transition-colors"
-                />
-              </div>
+              {!hasInviteFromLink && (
+                <div>
+                  <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1.5">邀请码</label>
+                  <input
+                    value={inviteCode}
+                    onChange={e => { setInviteCode(e.target.value.toUpperCase()); setJoinError('') }}
+                    placeholder="输入6位邀请码"
+                    maxLength={6}
+                    className="w-full px-4 py-2.5 bg-white rounded-xl text-sm tracking-widest text-center font-bold outline-none border border-cream-dark focus:border-secondary transition-colors"
+                  />
+                </div>
+              )}
               {joinError && (
                 <p className="text-xs text-[var(--color-danger)] text-center">{joinError}</p>
               )}

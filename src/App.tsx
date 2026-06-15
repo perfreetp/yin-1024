@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import BottomNav from '@/components/BottomNav'
 import { useAppStore, useBroadcastSync } from '@/store/useAppStore'
 import CreateHouse from '@/pages/CreateHouse'
@@ -15,8 +15,14 @@ import Profile from '@/pages/Profile'
 import Checkin from '@/pages/Checkin'
 
 function HouseGuard({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
   const hasHouse = useAppStore(s => s.hasHouse)
-  if (!hasHouse()) return <Navigate to="/welcome" replace />
+  if (!hasHouse()) {
+    const params = new URLSearchParams(location.search)
+    const invite = params.get('invite')
+    const to = invite ? `/welcome?invite=${invite}` : '/welcome'
+    return <Navigate to={to} replace />
+  }
   return <>{children}</>
 }
 
