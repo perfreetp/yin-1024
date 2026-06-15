@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { Home, Users, ArrowRight, Key } from 'lucide-react'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStore, preloadHouseFromHash } from '@/store/useAppStore'
 
 const AVATARS = ['🧑', '👩', '👨', '👩‍🦰', '🧑‍🦱', '👩‍🦳', '🧑‍🦳', '👨‍🦰']
 
@@ -23,6 +23,7 @@ export default function CreateHouse() {
   const [hasInviteFromLink, setHasInviteFromLink] = useState(false)
 
   useEffect(() => {
+    preloadHouseFromHash()
     const code = searchParams.get('invite')
     if (code) {
       setInviteCode(code.toUpperCase())

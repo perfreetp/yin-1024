@@ -40,7 +40,7 @@ export default function HouseOverview() {
   }
 
   const handleCopyLink = () => {
-    const url = `${window.location.origin}${window.location.pathname}?invite=${house.inviteCode}`
+    const url = window.location.href
     navigator.clipboard.writeText(url).then(() => {
       showToast('邀请链接已复制')
     })

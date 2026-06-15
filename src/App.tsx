@@ -1,6 +1,7 @@
+import { useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import BottomNav from '@/components/BottomNav'
-import { useAppStore, useBroadcastSync } from '@/store/useAppStore'
+import { useAppStore, useBroadcastSync, preloadHouseFromHash } from '@/store/useAppStore'
 import CreateHouse from '@/pages/CreateHouse'
 import HouseOverview from '@/pages/HouseOverview'
 import Home from '@/pages/Home'
@@ -20,7 +21,10 @@ function HouseGuard({ children }: { children: React.ReactNode }) {
   if (!hasHouse()) {
     const params = new URLSearchParams(location.search)
     const invite = params.get('invite')
-    const to = invite ? `/welcome?invite=${invite}` : '/welcome'
+    const hash = location.hash
+    let to = '/welcome'
+    if (invite) to = `/welcome?invite=${invite}`
+    if (hash) to = to + hash
     return <Navigate to={to} replace />
   }
   return <>{children}</>
@@ -28,6 +32,10 @@ function HouseGuard({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   useBroadcastSync()
+
+  useEffect(() => {
+    preloadHouseFromHash()
+  }, [])
 
   return (
     <Router>

@@ -47,7 +47,7 @@ export default function Profile() {
   }
 
   const handleCopyLink = () => {
-    const url = `${window.location.origin}${window.location.pathname}?invite=${house.inviteCode}`
+    const url = window.location.href
     navigator.clipboard.writeText(url).then(() => {
       showToast('已复制邀请链接')
     })

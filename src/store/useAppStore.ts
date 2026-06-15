@@ -172,15 +172,76 @@ function buildSampleData(houseId: string, ownerId: string): Omit<HouseData, 'hou
 const HOUSE_STORAGE_PREFIX = 'tongju-house-'
 const CURRENT_STORAGE_KEY = 'tongju-current'
 const CHANNEL_NAME = 'tongju-sync'
+const HASH_PREFIX = 'td='
 
-function loadHouseData(inviteCode: string): HouseData | null {
+function encodeHouseData(data: HouseData): string {
   try {
-    const raw = localStorage.getItem(HOUSE_STORAGE_PREFIX + inviteCode.toUpperCase())
-    if (!raw) return null
-    return JSON.parse(raw)
+    const json = JSON.stringify(data)
+    const encoded = btoa(unescape(encodeURIComponent(json)))
+    return HASH_PREFIX + encoded
+  } catch {
+    return ''
+  }
+}
+
+function decodeHouseData(hash: string): HouseData | null {
+  try {
+    if (!hash.startsWith(HASH_PREFIX)) return null
+    const encoded = hash.slice(HASH_PREFIX.length)
+    const json = decodeURIComponent(escape(atob(encoded)))
+    return JSON.parse(json)
   } catch {
     return null
   }
+}
+
+function getCurrentHash(): string {
+  if (typeof window === 'undefined') return ''
+  return window.location.hash.slice(1)
+}
+
+function updateUrlHash(data: HouseData) {
+  if (typeof window === 'undefined' || !data.house.inviteCode) return
+  const hash = encodeHouseData(data)
+  try {
+    const url = new URL(window.location.href)
+    url.hash = hash
+    window.history.replaceState(null, '', url.toString())
+  } catch {}
+}
+
+function loadHouseData(inviteCode: string): HouseData | null {
+  const code = inviteCode.toUpperCase()
+  const hash = getCurrentHash()
+  const fromHash = decodeHouseData(hash)
+
+  let localData: HouseData | null = null
+  try {
+    const raw = localStorage.getItem(HOUSE_STORAGE_PREFIX + code)
+    if (raw) localData = JSON.parse(raw)
+  } catch {}
+
+  if (fromHash && fromHash.house.inviteCode === code) {
+    if (!localData || fromHash.members.length > localData.members.length) {
+      saveHouseData(code, fromHash)
+      return fromHash
+    }
+    if (localData) {
+      const mergedMembers = [
+        ...localData.members,
+        ...fromHash.members.filter(m => !localData!.members.some(lm => lm.id === m.id)),
+      ]
+      if (mergedMembers.length > localData.members.length) {
+        const merged: HouseData = { ...localData, members: mergedMembers }
+        saveHouseData(code, merged)
+        return merged
+      }
+      return localData
+    }
+    return fromHash
+  }
+
+  return localData
 }
 
 function saveHouseData(inviteCode: string, data: HouseData) {
@@ -357,6 +418,23 @@ function withPersistence(set: Setter): Setter {
       const nextState = replace ? next : { ...state, ...next }
       persistHouseData(nextState)
       broadcastSync(nextState)
+      if (nextState.house?.inviteCode) {
+        updateUrlHash({
+          house: nextState.house,
+          members: nextState.members,
+          chores: nextState.chores,
+          checkins: nextState.checkins,
+          shifts: nextState.shifts,
+          shopping: nextState.shopping,
+          expenses: nextState.expenses,
+          fridge: nextState.fridge,
+          votes: nextState.votes,
+          visitors: nextState.visitors,
+          messages: nextState.messages,
+          announcements: nextState.announcements,
+          activities: nextState.activities,
+        })
+      }
       return nextState
     }, replace)
   }
@@ -440,7 +518,17 @@ export const useAppStore = create<AppState>()(
 
         joinHouse: (inviteCode, userName, avatar) => {
           const code = inviteCode.toUpperCase()
-          const data = loadHouseData(code)
+          const hash = getCurrentHash()
+          const fromHash = decodeHouseData(hash)
+          let data: HouseData | null = null
+
+          if (fromHash && fromHash.house.inviteCode === code) {
+            data = fromHash
+            saveHouseData(code, data)
+          } else {
+            data = loadHouseData(code)
+          }
+
           if (!data) return false
 
           const newMember: Member = {
@@ -456,6 +544,7 @@ export const useAppStore = create<AppState>()(
 
           saveHouseData(code, newData)
           saveCurrentSession(code, newMember.id)
+          updateUrlHash(newData)
 
           _set({
             currentMemberId: newMember.id,
@@ -754,4 +843,30 @@ export function useBroadcastSync() {
     ch.addEventListener('message', handler)
     return () => ch.removeEventListener('message', handler)
   }, [])
+}
+
+export function preloadHouseFromHash() {
+  const hash = getCurrentHash()
+  const data = decodeHouseData(hash)
+  if (data && data.house.inviteCode) {
+    const code = data.house.inviteCode.toUpperCase()
+    let existingData: HouseData | null = null
+    try {
+      const raw = localStorage.getItem(HOUSE_STORAGE_PREFIX + code)
+      if (raw) existingData = JSON.parse(raw)
+    } catch {}
+
+    if (!existingData) {
+      saveHouseData(code, data)
+    } else {
+      const mergedMembers = [
+        ...existingData.members,
+        ...data.members.filter(m => !existingData!.members.some(lm => lm.id === m.id)),
+      ]
+      if (mergedMembers.length > existingData.members.length) {
+        const merged: HouseData = { ...existingData, members: mergedMembers }
+        saveHouseData(code, merged)
+      }
+    }
+  }
 }
