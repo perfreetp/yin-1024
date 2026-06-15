@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import {
   Copy, Crown, Refrigerator, MessageSquare, Vote,
-  UserRoundPlus, ScrollText, BookOpen, Plus, X, LogOut
+  UserRoundPlus, ScrollText, BookOpen, Plus, X, LogOut,
+  Share2, Pencil, Check
 } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import Avatar from '@/components/Avatar'
@@ -17,13 +18,16 @@ const QUICK_ENTRIES = [
 ]
 
 export default function Profile() {
+  const navigate = useNavigate()
   const house = useAppStore(s => s.house)
   const members = useAppStore(s => s.members)
   const getCurrentMember = useAppStore(s => s.getCurrentMember)
-  const updateHouseRules = useAppStore(s => s.updateHouseRules)
+  const updateHouseInfo = useAppStore(s => s.updateHouseInfo)
+  const leaveHouse = useAppStore(s => s.leaveHouse)
   const currentMemberId = useAppStore(s => s.currentMemberId)
 
   const me = getCurrentMember()
+  const isOwner = me.role === 'owner'
 
   const [toast, setToast] = useState('')
   const [showRuleModal, setShowRuleModal] = useState(false)
@@ -38,7 +42,14 @@ export default function Profile() {
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(house.inviteCode).then(() => {
-      showToast('已复制')
+      showToast('已复制邀请码')
+    })
+  }
+
+  const handleCopyLink = () => {
+    const url = `${window.location.origin}${window.location.pathname}?invite=${house.inviteCode}`
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('已复制邀请链接')
     })
   }
 
@@ -60,7 +71,7 @@ export default function Profile() {
   }
 
   const handleSaveRules = () => {
-    updateHouseRules(editRules)
+    updateHouseInfo({ rules: editRules })
     setShowRuleModal(false)
     showToast('房规已更新')
   }
@@ -69,6 +80,11 @@ export default function Profile() {
     if (entry.isRule) {
       handleOpenRuleModal()
     }
+  }
+
+  const handleLeave = () => {
+    leaveHouse()
+    navigate('/welcome', { replace: true })
   }
 
   return (
@@ -167,8 +183,9 @@ export default function Profile() {
 
       <button
         onClick={() => setShowLogoutConfirm(true)}
-        className="w-full py-3 text-center text-[var(--color-danger)] font-medium text-sm active:opacity-70 transition-opacity"
+        className="w-full py-3 text-center text-[var(--color-danger)] font-medium text-sm active:opacity-70 transition-opacity flex items-center justify-center gap-1.5"
       >
+        <LogOut className="w-4 h-4" />
         退出合租屋
       </button>
 
@@ -241,7 +258,7 @@ export default function Profile() {
                 取消
               </button>
               <button
-                onClick={() => { setShowLogoutConfirm(false); showToast('已退出合租屋') }}
+                onClick={handleLeave}
                 className="flex-1 bg-[var(--color-danger)] text-white rounded-full py-2 text-sm font-medium active:scale-95 transition-transform"
               >
                 退出

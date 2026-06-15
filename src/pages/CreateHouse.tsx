@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Home, Users, ArrowRight } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 
 const AVATARS = ['🧑', '👩', '👨', '👩‍🦰', '🧑‍🦱', '👩‍🦳', '🧑‍🦳', '👨‍🦰']
 
 export default function CreateHouse() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const createHouse = useAppStore(s => s.createHouse)
   const joinHouse = useAppStore(s => s.joinHouse)
 
@@ -17,15 +20,26 @@ export default function CreateHouse() {
   const [inviteCode, setInviteCode] = useState('')
   const [joinError, setJoinError] = useState('')
 
+  useEffect(() => {
+    const code = searchParams.get('invite')
+    if (code) {
+      setInviteCode(code.toUpperCase())
+      setMode('join')
+    }
+  }, [searchParams])
+
   const handleCreate = () => {
     if (!houseName.trim() || !userName.trim()) return
     createHouse(houseName.trim(), address.trim(), userName.trim(), avatar, withSample)
+    navigate('/overview', { replace: true })
   }
 
   const handleJoin = () => {
     if (!inviteCode.trim() || !userName.trim()) return
     const ok = joinHouse(inviteCode.trim(), userName.trim(), avatar)
-    if (!ok) {
+    if (ok) {
+      navigate('/overview', { replace: true })
+    } else {
       setJoinError('邀请码无效，请确认后重试')
     }
   }

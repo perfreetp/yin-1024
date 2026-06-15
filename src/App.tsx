@@ -1,7 +1,8 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import BottomNav from '@/components/BottomNav'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStore, useBroadcastSync } from '@/store/useAppStore'
 import CreateHouse from '@/pages/CreateHouse'
+import HouseOverview from '@/pages/HouseOverview'
 import Home from '@/pages/Home'
 import Chores from '@/pages/Chores'
 import Shopping from '@/pages/Shopping'
@@ -20,12 +21,15 @@ function HouseGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  useBroadcastSync()
+
   return (
     <Router>
       <div className="flex flex-col min-h-screen bg-cream">
         <div className="flex-1">
           <Routes>
             <Route path="/welcome" element={<CreateHouse />} />
+            <Route path="/overview" element={<HouseGuard><HouseOverview /></HouseGuard>} />
             <Route path="/" element={<HouseGuard><Home /></HouseGuard>} />
             <Route path="/chores" element={<HouseGuard><Chores /></HouseGuard>} />
             <Route path="/shopping" element={<HouseGuard><Shopping /></HouseGuard>} />

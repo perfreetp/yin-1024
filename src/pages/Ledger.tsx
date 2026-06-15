@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import PageHeader from '@/components/PageHeader'
 import Avatar from '@/components/Avatar'
-import { Plus, X, Wallet, TrendingDown, Check } from 'lucide-react'
+import { Plus, X, Wallet, TrendingDown, Check, AlertCircle } from 'lucide-react'
 
 const CATEGORIES = ['日用品', '水电费', '公共基金', '网费', '其他']
 
@@ -23,6 +23,18 @@ export default function Ledger() {
 
   const unsettled = expenses.filter(e => !e.settled)
   const settled = expenses.filter(e => e.settled)
+
+  const myUnpaidBills = expenses.filter(e => !e.settled).flatMap(e =>
+    e.splits.filter(s => s.memberId === currentMemberId && !s.paid).map(s => ({
+      expenseId: e.id,
+      description: e.description,
+      amount: s.amount,
+      payerId: e.payerId,
+      category: e.category,
+    }))
+  )
+
+  const totalUnpaid = myUnpaidBills.reduce((sum, b) => sum + b.amount, 0)
 
   const totalIncome = expenses
     .filter(e => e.category === '公共基金')
@@ -87,6 +99,52 @@ export default function Ledger() {
             </span>
           </div>
         </div>
+
+        {myUnpaidBills.length > 0 && (
+          <div className="mb-6">
+            <h2 className="section-title mb-3 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-[var(--color-danger)]" />
+              我的待付款
+              <span className="ml-auto text-sm font-bold text-[var(--color-danger)]">
+                ¥{totalUnpaid.toFixed(2)}
+              </span>
+            </h2>
+            <div className="space-y-2">
+              {myUnpaidBills.map((bill, i) => {
+                const payer = getMemberById(bill.payerId)
+                return (
+                  <div
+                    key={i}
+                    className="card !p-3 border-2 border-red-200 bg-red-50/50 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <Avatar memberId={bill.payerId} size="sm" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[var(--color-text)] truncate">
+                          {bill.description}
+                        </p>
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          {bill.category} · {payer?.name} 垫付
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-2">
+                      <span className="font-bold text-[var(--color-danger)]">
+                        ¥{bill.amount.toFixed(2)}
+                      </span>
+                      <button
+                        onClick={() => settleExpenseSplit(bill.expenseId, currentMemberId)}
+                        className="px-3 py-1.5 bg-[var(--color-danger)] text-white text-xs rounded-full font-medium active:scale-90 transition-transform"
+                      >
+                        立即结算
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="mb-6">
           <h2 className="section-title mb-3">待结算</h2>

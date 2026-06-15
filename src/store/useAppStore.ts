@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { useEffect, useState } from 'react'
 import type {
   House, Member, ChoreSchedule, ChoreCheckin, ShiftRequest,
   ShoppingItem, Expense, FridgeItem, Vote, Visitor,
@@ -24,7 +25,8 @@ const EMPTY_HOUSE: House = {
   rules: [], ownerId: '', commonFund: 0,
 }
 
-function buildSampleData(houseId: string, ownerId: string): {
+interface HouseData {
+  house: House
   members: Member[]
   chores: ChoreSchedule[]
   checkins: ChoreCheckin[]
@@ -37,7 +39,9 @@ function buildSampleData(houseId: string, ownerId: string): {
   messages: ChatMessage[]
   announcements: Announcement[]
   activities: ActivityItem[]
-} {
+}
+
+function buildSampleData(houseId: string, ownerId: string): Omit<HouseData, 'house'> {
   const m1: Member = { id: ownerId, houseId, name: '小王', avatar: '🧑', role: 'owner' }
   const m2: Member = { id: 'm2', houseId, name: '小李', avatar: '👩', role: 'member' }
   const m3: Member = { id: 'm3', houseId, name: '小张', avatar: '👨', role: 'member' }
@@ -165,28 +169,60 @@ function buildSampleData(houseId: string, ownerId: string): {
   return { members, chores, checkins, shifts, shopping, expenses, fridge, votes, visitors, messages, announcements, activities }
 }
 
-interface AppState {
+const HOUSE_STORAGE_PREFIX = 'tongju-house-'
+const CURRENT_STORAGE_KEY = 'tongju-current'
+const CHANNEL_NAME = 'tongju-sync'
+
+function loadHouseData(inviteCode: string): HouseData | null {
+  try {
+    const raw = localStorage.getItem(HOUSE_STORAGE_PREFIX + inviteCode.toUpperCase())
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function saveHouseData(inviteCode: string, data: HouseData) {
+  try {
+    localStorage.setItem(HOUSE_STORAGE_PREFIX + inviteCode.toUpperCase(), JSON.stringify(data))
+  } catch {}
+}
+
+function loadCurrentSession(): { inviteCode: string; memberId: string } | null {
+  try {
+    const raw = localStorage.getItem(CURRENT_STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function saveCurrentSession(inviteCode: string, memberId: string) {
+  try {
+    localStorage.setItem(CURRENT_STORAGE_KEY, JSON.stringify({ inviteCode, memberId }))
+  } catch {}
+}
+
+function clearCurrentSession() {
+  try {
+    localStorage.removeItem(CURRENT_STORAGE_KEY)
+  } catch {}
+}
+
+interface AppState extends HouseData {
   currentMemberId: string
-  house: House
-  members: Member[]
-  chores: ChoreSchedule[]
-  checkins: ChoreCheckin[]
-  shifts: ShiftRequest[]
-  shopping: ShoppingItem[]
-  expenses: Expense[]
-  fridge: FridgeItem[]
-  votes: Vote[]
-  visitors: Visitor[]
-  messages: ChatMessage[]
-  announcements: Announcement[]
-  activities: ActivityItem[]
 
   hasHouse: () => boolean
   getCurrentMember: () => Member
   getMemberById: (id: string) => Member | undefined
 
-  createHouse: (name: string, address: string, userName: string, avatar: string, withSample: boolean) => void
+  createHouse: (name: string, address: string, userName: string, avatar: string, withSample: boolean) => string
   joinHouse: (inviteCode: string, userName: string, avatar: string) => boolean
+  leaveHouse: () => void
+
+  updateHouseInfo: (info: Partial<Pick<House, 'name' | 'address' | 'rules'>>) => void
 
   addChoreCheckin: (scheduleId: string) => void
   toggleChoreComplete: (choreId: string) => void
@@ -214,83 +250,227 @@ interface AppState {
   sendMessage: (content: string, type?: ChatMessage['type']) => void
   markAnnouncementRead: (announcementId: string) => void
   addAnnouncement: (content: string) => void
-
-  updateHouseRules: (rules: string[]) => void
 }
 
 let idCounter = 100
 const genId = () => String(++idCounter)
 
+let broadcastChannel: BroadcastChannel | null = null
+let isSyncing = false
+
+function getBroadcastChannel(): BroadcastChannel | null {
+  if (typeof window === 'undefined') return null
+  if (!broadcastChannel) {
+    try {
+      broadcastChannel = new BroadcastChannel(CHANNEL_NAME)
+    } catch {
+      return null
+    }
+  }
+  return broadcastChannel
+}
+
+function getInitialState() {
+  const session = loadCurrentSession()
+  if (session) {
+    const data = loadHouseData(session.inviteCode)
+    if (data) {
+      return {
+        ...data,
+        currentMemberId: session.memberId,
+      }
+    }
+  }
+  return {
+    currentMemberId: '',
+    house: EMPTY_HOUSE,
+    members: [],
+    chores: [],
+    checkins: [],
+    shifts: [],
+    shopping: [],
+    expenses: [],
+    fridge: [],
+    votes: [],
+    visitors: [],
+    messages: [],
+    announcements: [],
+    activities: [],
+  }
+}
+
+type Setter = (
+  partial: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>),
+  replace?: boolean | undefined
+) => void
+
+function persistHouseData(state: AppState) {
+  if (state.house.inviteCode) {
+    saveHouseData(state.house.inviteCode, {
+      house: state.house,
+      members: state.members,
+      chores: state.chores,
+      checkins: state.checkins,
+      shifts: state.shifts,
+      shopping: state.shopping,
+      expenses: state.expenses,
+      fridge: state.fridge,
+      votes: state.votes,
+      visitors: state.visitors,
+      messages: state.messages,
+      announcements: state.announcements,
+      activities: state.activities,
+    })
+  }
+}
+
+function broadcastSync(state: AppState) {
+  const ch = getBroadcastChannel()
+  if (!ch || !state.house.inviteCode || isSyncing) return
+  try {
+    ch.postMessage({
+      type: 'sync',
+      inviteCode: state.house.inviteCode,
+      data: {
+        house: state.house,
+        members: state.members,
+        chores: state.chores,
+        checkins: state.checkins,
+        shifts: state.shifts,
+        shopping: state.shopping,
+        expenses: state.expenses,
+        fridge: state.fridge,
+        votes: state.votes,
+        visitors: state.visitors,
+        messages: state.messages,
+        announcements: state.announcements,
+        activities: state.activities,
+      },
+    })
+  } catch {}
+}
+
+function withPersistence(set: Setter): Setter {
+  return (partial, replace) => {
+    set((state) => {
+      const next = typeof partial === 'function' ? (partial as any)(state) : partial
+      const nextState = replace ? next : { ...state, ...next }
+      persistHouseData(nextState)
+      broadcastSync(nextState)
+      return nextState
+    }, replace)
+  }
+}
+
 export const useAppStore = create<AppState>()(
   persist(
-    (set, get) => ({
-      currentMemberId: '',
-      house: EMPTY_HOUSE,
-      members: [],
-      chores: [],
-      checkins: [],
-      shifts: [],
-      shopping: [],
-      expenses: [],
-      fridge: [],
-      votes: [],
-      visitors: [],
-      messages: [],
-      announcements: [],
-      activities: [],
+    (set, get) => {
+      const _set = withPersistence(set)
 
-      hasHouse: () => get().house.id !== '',
+      return {
+        ...getInitialState(),
 
-      getCurrentMember: () => {
-        const state = get()
-        return state.members.find(m => m.id === state.currentMemberId)!
-      },
-      getMemberById: (id) => {
-        return get().members.find(m => m.id === id)
-      },
+        hasHouse: () => get().house.id !== '',
 
-      createHouse: (name, address, userName, avatar, withSample) => {
-        const houseId = 'h_' + Date.now()
-        const ownerId = 'm_' + Date.now()
-        const inviteCode = genInviteCode()
+        getCurrentMember: () => {
+          const state = get()
+          return state.members.find(m => m.id === state.currentMemberId)!
+        },
+        getMemberById: (id) => {
+          return get().members.find(m => m.id === id)
+        },
 
-        const house: House = {
-          id: houseId, name, address, inviteCode,
-          rules: [
-            '公共区域保持整洁，用完即清',
-            '晚上10点后降低音量',
-            '厨房用后及时清洗',
-            '访客需提前一天报备',
-            '公共用品缺货及时补录',
-          ],
-          ownerId, commonFund: 0,
-        }
+        createHouse: (name, address, userName, avatar, withSample) => {
+          const houseId = 'h_' + Date.now()
+          const ownerId = 'm_' + Date.now()
+          const inviteCode = genInviteCode()
 
-        const owner: Member = { id: ownerId, houseId, name: userName, avatar, role: 'owner' }
+          const house: House = {
+            id: houseId, name, address, inviteCode,
+            rules: [
+              '公共区域保持整洁，用完即清',
+              '晚上10点后降低音量',
+              '厨房用后及时清洗',
+              '访客需提前一天报备',
+              '公共用品缺货及时补录',
+            ],
+            ownerId, commonFund: 0,
+          }
 
-        if (withSample) {
-          const sample = buildSampleData(houseId, ownerId)
-          set({
+          const owner: Member = { id: ownerId, houseId, name: userName, avatar, role: 'owner' }
+
+          let data: HouseData
+          if (withSample) {
+            const sample = buildSampleData(houseId, ownerId)
+            data = {
+              house,
+              ...sample,
+              members: sample.members.map(m =>
+                m.id === ownerId ? { ...m, name: userName, avatar } : m
+              ),
+            }
+          } else {
+            data = {
+              house,
+              members: [owner],
+              chores: [],
+              checkins: [],
+              shifts: [],
+              shopping: [],
+              expenses: [],
+              fridge: [],
+              votes: [],
+              visitors: [],
+              messages: [],
+              announcements: [],
+              activities: [],
+            }
+          }
+
+          saveHouseData(inviteCode, data)
+          saveCurrentSession(inviteCode, ownerId)
+
+          _set({
             currentMemberId: ownerId,
-            house,
-            members: sample.members,
-            chores: sample.chores,
-            checkins: sample.checkins,
-            shifts: sample.shifts,
-            shopping: sample.shopping,
-            expenses: sample.expenses,
-            fridge: sample.fridge,
-            votes: sample.votes,
-            visitors: sample.visitors,
-            messages: sample.messages,
-            announcements: sample.announcements,
-            activities: sample.activities,
+            ...data,
           })
-        } else {
-          set({
-            currentMemberId: ownerId,
-            house,
-            members: [owner],
+
+          return inviteCode
+        },
+
+        joinHouse: (inviteCode, userName, avatar) => {
+          const code = inviteCode.toUpperCase()
+          const data = loadHouseData(code)
+          if (!data) return false
+
+          const newMember: Member = {
+            id: 'm_' + Date.now(),
+            houseId: data.house.id,
+            name: userName, avatar, role: 'member',
+          }
+
+          const newData: HouseData = {
+            ...data,
+            members: [...data.members, newMember],
+          }
+
+          saveHouseData(code, newData)
+          saveCurrentSession(code, newMember.id)
+
+          _set({
+            currentMemberId: newMember.id,
+            ...newData,
+          })
+
+          return true
+        },
+
+        leaveHouse: () => {
+          clearCurrentSession()
+          _set({
+            currentMemberId: '',
+            house: EMPTY_HOUSE,
+            members: [],
             chores: [],
             checkins: [],
             shifts: [],
@@ -303,188 +483,238 @@ export const useAppStore = create<AppState>()(
             announcements: [],
             activities: [],
           })
+        },
+
+        updateHouseInfo: (info) => {
+          _set(state => ({
+            house: { ...state.house, ...info },
+          }))
+        },
+
+        addChoreCheckin: (scheduleId) => {
+          const now = new Date().toISOString()
+          const memberId = get().currentMemberId
+          const chore = get().chores.find(c => c.id === scheduleId)
+          if (!chore || chore.memberId !== memberId) return
+          const checkin: ChoreCheckin = {
+            id: genId(), scheduleId, memberId,
+            photoUrl: '', completedAt: now,
+          }
+          _set(state => ({
+            checkins: [...state.checkins, checkin],
+            chores: state.chores.map(c =>
+              c.id === scheduleId ? { ...c, completed: true } : c
+            ),
+          }))
+        },
+        toggleChoreComplete: (choreId) => {
+          const memberId = get().currentMemberId
+          const chore = get().chores.find(c => c.id === choreId)
+          if (!chore || chore.memberId !== memberId) return
+          _set(state => ({
+            chores: state.chores.map(c =>
+              c.id === choreId ? { ...c, completed: !c.completed } : c
+            ),
+          }))
+        },
+
+        addShiftRequest: (request) => {
+          const shift: ShiftRequest = { ...request, id: genId(), status: 'pending' }
+          _set(state => ({ shifts: [...state.shifts, shift] }))
+        },
+        updateShiftStatus: (shiftId, status) => {
+          _set(state => ({
+            shifts: state.shifts.map(s =>
+              s.id === shiftId ? { ...s, status } : s
+            ),
+          }))
+        },
+
+        addShoppingItem: (item) => {
+          const newItem: ShoppingItem = { ...item, id: genId() }
+          _set(state => ({ shopping: [...state.shopping, newItem] }))
+        },
+        toggleShoppingPurchased: (itemId, price) => {
+          _set(state => ({
+            shopping: state.shopping.map(s =>
+              s.id === itemId
+                ? { ...s, purchased: !s.purchased, purchasedBy: s.purchased ? undefined : state.currentMemberId, price: s.purchased ? undefined : price }
+                : s
+            ),
+          }))
+        },
+        removeShoppingItem: (itemId) => {
+          _set(state => ({ shopping: state.shopping.filter(s => s.id !== itemId) }))
+        },
+
+        addExpense: (expense) => {
+          const newExpense: Expense = { ...expense, id: genId() }
+          _set(state => ({ expenses: [...state.expenses, newExpense] }))
+        },
+        settleExpenseSplit: (expenseId, memberId) => {
+          _set(state => ({
+            expenses: state.expenses.map(e => {
+              if (e.id !== expenseId) return e
+              const newSplits = e.splits.map(s =>
+                s.memberId === memberId ? { ...s, paid: true } : s
+              )
+              return { ...e, splits: newSplits, settled: newSplits.every(s => s.paid) }
+            }),
+          }))
+        },
+
+        addFridgeItem: (item) => {
+          const newItem: FridgeItem = { ...item, id: genId() }
+          _set(state => ({ fridge: [...state.fridge, newItem] }))
+        },
+        removeFridgeItem: (itemId) => {
+          _set(state => ({ fridge: state.fridge.filter(f => f.id !== itemId) }))
+        },
+        borrowFridgeItem: (itemId, borrowedBy, returnDate) => {
+          _set(state => ({
+            fridge: state.fridge.map(f =>
+              f.id === itemId
+                ? { ...f, borrowed: true, borrowedBy, borrowReturnDate: returnDate }
+                : f
+            ),
+          }))
+        },
+        returnFridgeItem: (itemId) => {
+          _set(state => ({
+            fridge: state.fridge.map(f =>
+              f.id === itemId
+                ? { ...f, borrowed: false, borrowedBy: undefined, borrowReturnDate: undefined }
+                : f
+            ),
+          }))
+        },
+
+        addVote: (vote) => {
+          const newVote: Vote = { ...vote, id: genId(), status: 'active' }
+          _set(state => ({ votes: [...state.votes, newVote] }))
+        },
+        castVote: (voteId, optionIndex) => {
+          const memberId = get().currentMemberId
+          _set(state => ({
+            votes: state.votes.map(v =>
+              v.id === voteId
+                ? {
+                    ...v,
+                    options: v.options.map((opt, i) => ({
+                      ...opt,
+                      votes: i === optionIndex
+                        ? [...opt.votes.filter(id => id !== memberId), memberId]
+                        : opt.votes.filter(id => id !== memberId),
+                    })),
+                  }
+                : v
+            ),
+          }))
+        },
+
+        addVisitor: (visitor) => {
+          const newVisitor: Visitor = { ...visitor, id: genId() }
+          _set(state => ({ visitors: [...state.visitors, newVisitor] }))
+        },
+        updateVisitorStatus: (visitorId, status) => {
+          _set(state => ({
+            visitors: state.visitors.map(v =>
+              v.id === visitorId ? { ...v, status } : v
+            ),
+          }))
+        },
+
+        sendMessage: (content, type = 'text') => {
+          const state = get()
+          const msg: ChatMessage = {
+            id: genId(), houseId: state.house.id, senderId: state.currentMemberId,
+            content, type, createdAt: new Date().toISOString(),
+          }
+          _set(state => ({ messages: [...state.messages, msg] }))
+        },
+        markAnnouncementRead: (announcementId) => {
+          const memberId = get().currentMemberId
+          _set(state => ({
+            announcements: state.announcements.map(a =>
+              a.id === announcementId && !a.readBy.includes(memberId)
+                ? { ...a, readBy: [...a.readBy, memberId] }
+                : a
+            ),
+          }))
+        },
+        addAnnouncement: (content) => {
+          const state = get()
+          const ann: Announcement = {
+            id: genId(), houseId: state.house.id, authorId: state.currentMemberId,
+            content, createdAt: new Date().toISOString(), readBy: [state.currentMemberId],
+          }
+          _set(state => ({ announcements: [ann, ...state.announcements] }))
+        },
+      }
+    },
+    {
+      name: 'tongju-store',
+      partialize: (state) => ({
+        currentMemberId: state.currentMemberId,
+        house: state.house,
+        members: state.members,
+        chores: state.chores,
+        checkins: state.checkins,
+        shifts: state.shifts,
+        shopping: state.shopping,
+        expenses: state.expenses,
+        fridge: state.fridge,
+        votes: state.votes,
+        visitors: state.visitors,
+        messages: state.messages,
+        announcements: state.announcements,
+        activities: state.activities,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state && state.house.inviteCode) {
+          persistHouseData(state)
         }
       },
-
-      joinHouse: (inviteCode, userName, avatar) => {
-        const state = get()
-        if (state.house.inviteCode.toUpperCase() !== inviteCode.toUpperCase()) return false
-        const newMember: Member = {
-          id: 'm_' + Date.now(),
-          houseId: state.house.id,
-          name: userName, avatar, role: 'member',
-        }
-        set(s => ({
-          currentMemberId: newMember.id,
-          members: [...s.members, newMember],
-        }))
-        return true
-      },
-
-      addChoreCheckin: (scheduleId) => {
-        const now = new Date().toISOString()
-        const memberId = get().currentMemberId
-        const chore = get().chores.find(c => c.id === scheduleId)
-        if (!chore || chore.memberId !== memberId) return
-        const checkin: ChoreCheckin = {
-          id: genId(), scheduleId, memberId,
-          photoUrl: '', completedAt: now,
-        }
-        set(state => ({
-          checkins: [...state.checkins, checkin],
-          chores: state.chores.map(c =>
-            c.id === scheduleId ? { ...c, completed: true } : c
-          ),
-        }))
-      },
-      toggleChoreComplete: (choreId) => {
-        const memberId = get().currentMemberId
-        const chore = get().chores.find(c => c.id === choreId)
-        if (!chore || chore.memberId !== memberId) return
-        set(state => ({
-          chores: state.chores.map(c =>
-            c.id === choreId ? { ...c, completed: !c.completed } : c
-          ),
-        }))
-      },
-
-      addShiftRequest: (request) => {
-        const shift: ShiftRequest = { ...request, id: genId(), status: 'pending' }
-        set(state => ({ shifts: [...state.shifts, shift] }))
-      },
-      updateShiftStatus: (shiftId, status) => {
-        set(state => ({
-          shifts: state.shifts.map(s =>
-            s.id === shiftId ? { ...s, status } : s
-          ),
-        }))
-      },
-
-      addShoppingItem: (item) => {
-        const newItem: ShoppingItem = { ...item, id: genId() }
-        set(state => ({ shopping: [...state.shopping, newItem] }))
-      },
-      toggleShoppingPurchased: (itemId, price) => {
-        set(state => ({
-          shopping: state.shopping.map(s =>
-            s.id === itemId
-              ? { ...s, purchased: !s.purchased, purchasedBy: s.purchased ? undefined : state.currentMemberId, price: s.purchased ? undefined : price }
-              : s
-          ),
-        }))
-      },
-      removeShoppingItem: (itemId) => {
-        set(state => ({ shopping: state.shopping.filter(s => s.id !== itemId) }))
-      },
-
-      addExpense: (expense) => {
-        const newExpense: Expense = { ...expense, id: genId() }
-        set(state => ({ expenses: [...state.expenses, newExpense] }))
-      },
-      settleExpenseSplit: (expenseId, memberId) => {
-        set(state => ({
-          expenses: state.expenses.map(e => {
-            if (e.id !== expenseId) return e
-            const newSplits = e.splits.map(s =>
-              s.memberId === memberId ? { ...s, paid: true } : s
-            )
-            return { ...e, splits: newSplits, settled: newSplits.every(s => s.paid) }
-          }),
-        }))
-      },
-
-      addFridgeItem: (item) => {
-        const newItem: FridgeItem = { ...item, id: genId() }
-        set(state => ({ fridge: [...state.fridge, newItem] }))
-      },
-      removeFridgeItem: (itemId) => {
-        set(state => ({ fridge: state.fridge.filter(f => f.id !== itemId) }))
-      },
-      borrowFridgeItem: (itemId, borrowedBy, returnDate) => {
-        set(state => ({
-          fridge: state.fridge.map(f =>
-            f.id === itemId
-              ? { ...f, borrowed: true, borrowedBy, borrowReturnDate: returnDate }
-              : f
-          ),
-        }))
-      },
-      returnFridgeItem: (itemId) => {
-        set(state => ({
-          fridge: state.fridge.map(f =>
-            f.id === itemId
-              ? { ...f, borrowed: false, borrowedBy: undefined, borrowReturnDate: undefined }
-              : f
-          ),
-        }))
-      },
-
-      addVote: (vote) => {
-        const newVote: Vote = { ...vote, id: genId(), status: 'active' }
-        set(state => ({ votes: [...state.votes, newVote] }))
-      },
-      castVote: (voteId, optionIndex) => {
-        const memberId = get().currentMemberId
-        set(state => ({
-          votes: state.votes.map(v =>
-            v.id === voteId
-              ? {
-                  ...v,
-                  options: v.options.map((opt, i) => ({
-                    ...opt,
-                    votes: i === optionIndex
-                      ? [...opt.votes.filter(id => id !== memberId), memberId]
-                      : opt.votes.filter(id => id !== memberId),
-                  })),
-                }
-              : v
-          ),
-        }))
-      },
-
-      addVisitor: (visitor) => {
-        const newVisitor: Visitor = { ...visitor, id: genId() }
-        set(state => ({ visitors: [...state.visitors, newVisitor] }))
-      },
-      updateVisitorStatus: (visitorId, status) => {
-        set(state => ({
-          visitors: state.visitors.map(v =>
-            v.id === visitorId ? { ...v, status } : v
-          ),
-        }))
-      },
-
-      sendMessage: (content, type = 'text') => {
-        const state = get()
-        const msg: ChatMessage = {
-          id: genId(), houseId: state.house.id, senderId: state.currentMemberId,
-          content, type, createdAt: new Date().toISOString(),
-        }
-        set(state => ({ messages: [...state.messages, msg] }))
-      },
-      markAnnouncementRead: (announcementId) => {
-        const memberId = get().currentMemberId
-        set(state => ({
-          announcements: state.announcements.map(a =>
-            a.id === announcementId && !a.readBy.includes(memberId)
-              ? { ...a, readBy: [...a.readBy, memberId] }
-              : a
-          ),
-        }))
-      },
-      addAnnouncement: (content) => {
-        const state = get()
-        const ann: Announcement = {
-          id: genId(), houseId: state.house.id, authorId: state.currentMemberId,
-          content, createdAt: new Date().toISOString(), readBy: [state.currentMemberId],
-        }
-        set(state => ({ announcements: [ann, ...state.announcements] }))
-      },
-
-      updateHouseRules: (rules) => {
-        set(state => ({ house: { ...state.house, rules } }))
-      },
-    }),
-    { name: 'tongju-store' }
+    }
   )
 )
+
+export function useBroadcastSync() {
+  const [, forceUpdate] = useState(0)
+
+  useEffect(() => {
+    const ch = getBroadcastChannel()
+    if (!ch) return
+
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type !== 'sync') return
+      const currentInvite = useAppStore.getState().house.inviteCode
+      if (!currentInvite || event.data.inviteCode !== currentInvite) return
+
+      isSyncing = true
+      try {
+        useAppStore.setState({
+          house: event.data.data.house,
+          members: event.data.data.members,
+          chores: event.data.data.chores,
+          checkins: event.data.data.checkins,
+          shifts: event.data.data.shifts,
+          shopping: event.data.data.shopping,
+          expenses: event.data.data.expenses,
+          fridge: event.data.data.fridge,
+          votes: event.data.data.votes,
+          visitors: event.data.data.visitors,
+          messages: event.data.data.messages,
+          announcements: event.data.data.announcements,
+          activities: event.data.data.activities,
+        })
+        forceUpdate(n => n + 1)
+      } finally {
+        setTimeout(() => { isSyncing = false }, 50)
+      }
+    }
+
+    ch.addEventListener('message', handler)
+    return () => ch.removeEventListener('message', handler)
+  }, [])
+}

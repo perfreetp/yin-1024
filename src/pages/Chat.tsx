@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronUp, Send, Megaphone } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ChevronDown, ChevronUp, Send, Megaphone, AlertCircle, Wallet } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import PageHeader from '@/components/PageHeader'
 import Avatar from '@/components/Avatar'
@@ -7,10 +8,12 @@ import Avatar from '@/components/Avatar'
 export default function Chat() {
   const messages = useAppStore(s => s.messages)
   const announcements = useAppStore(s => s.announcements)
+  const expenses = useAppStore(s => s.expenses)
   const sendMessage = useAppStore(s => s.sendMessage)
   const markAnnouncementRead = useAppStore(s => s.markAnnouncementRead)
   const getMemberById = useAppStore(s => s.getMemberById)
   const currentMemberId = useAppStore(s => s.currentMemberId)
+  const settleExpenseSplit = useAppStore(s => s.settleExpenseSplit)
   const members = useAppStore(s => s.members)
 
   const [inputValue, setInputValue] = useState('')
@@ -49,6 +52,15 @@ export default function Chat() {
   }
 
   const latestAnnouncement = announcements.length > 0 ? announcements[0] : null
+
+  const myUnpaidBills = expenses.filter(e => !e.settled).flatMap(e =>
+    e.splits.filter(s => s.memberId === currentMemberId && !s.paid).map(s => ({
+      expenseId: e.id,
+      description: e.description,
+      amount: s.amount,
+      payerId: e.payerId,
+    }))
+  )
 
   const formatTime = (dateStr: string) => {
     const d = new Date(dateStr)
@@ -100,6 +112,51 @@ export default function Chat() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {myUnpaidBills.length > 0 && (
+        <div className="bg-red-50 border-b border-red-200 flex-shrink-0">
+          <Link to="/ledger" className="block">
+            <div className="px-4 py-2.5">
+              <div className="flex items-center gap-2 mb-1.5">
+                <AlertCircle className="w-4 h-4 text-[var(--color-danger)] flex-shrink-0" />
+                <span className="text-sm font-bold text-[var(--color-danger)]">
+                  你有 {myUnpaidBills.length} 笔待付款
+                </span>
+                <ChevronDown className="w-4 h-4 text-[var(--color-danger)] ml-auto" />
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-0.5">
+                {myUnpaidBills.slice(0, 3).map((bill, i) => {
+                  const payer = getMemberById(bill.payerId)
+                  return (
+                    <div
+                      key={i}
+                      className="flex-shrink-0 bg-white rounded-lg px-3 py-2 flex items-center gap-2"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        settleExpenseSplit(bill.expenseId, currentMemberId)
+                      }}
+                    >
+                      <div className="text-xs">
+                        <p className="text-[var(--color-text)] font-medium truncate max-w-[80px]">{bill.description}</p>
+                        <p className="text-[var(--color-text-muted)]">垫付：{payer?.name}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[var(--color-danger)] font-bold text-sm">¥{bill.amount.toFixed(2)}</p>
+                        <p className="text-[10px] text-[var(--color-primary)]">点我结算</p>
+                      </div>
+                    </div>
+                  )
+                })}
+                {myUnpaidBills.length > 3 && (
+                  <div className="flex-shrink-0 bg-white/60 rounded-lg px-3 py-2 flex items-center">
+                    <span className="text-xs text-[var(--color-text-muted)]">+{myUnpaidBills.length - 3} 更多</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </Link>
         </div>
       )}
 
